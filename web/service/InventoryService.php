@@ -210,6 +210,46 @@ class InventoryService {
         }
     }
 
+    /**
+     * Verify there is enough stock for each requested line, without changing anything.
+     * Used before taking payment so a customer is never charged for unavailable items.
+     *
+     * @param array $items Rows with product_id, variant_id (nullable), size (nullable), quantity
+     * @throws Exception if any line cannot be fulfilled
+     */
+    public function assertStockAvailable(array $items) {
+        foreach ($items as $it) {
+            $pid = (int)$it['product_id'];
+            $vid = isset($it['variant_id']) ? (int)$it['variant_id'] : null;
+            $size = $it['size'] ?? null;
+            $qty = (int)$it['quantity'];
+            if ($qty <= 0) { continue; }
+
+            $sql = "SELECT COALESCE(SUM(stock_quantity), 0) FROM inventory WHERE product_id = :pid";
+            $params = [':pid' => $pid];
+            if ($vid !== null) {
+                $sql .= " AND variant_id = :vid";
+                $params[':vid'] = $vid;
+            } else {
+                $sql .= " AND variant_id IS NULL";
+            }
+            if ($size !== null && $size !== '') {
+                $sql .= " AND size = :size";
+                $params[':size'] = $size;
+            } else {
+                $sql .= " AND (size IS NULL OR size = '' OR size = 'default')";
+            }
+            $stmt = $this->conn->prepare($sql);
+            $stmt->execute($params);
+            $available = (int)$stmt->fetchColumn();
+
+            if ($available < $qty) {
+                $name = $it['name'] ?? ('product ' . $pid);
+                throw new Exception("Sorry, \"{$name}\" does not have enough stock (requested {$qty}, available {$available}).");
+            }
+        }
+    }
+
     public function deductStockForPaidOrder($orderId) {
         if (!is_numeric($orderId) || (int)$orderId <= 0) {
             throw new Exception('Invalid order ID.');

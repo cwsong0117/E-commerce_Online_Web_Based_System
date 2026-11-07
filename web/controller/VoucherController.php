@@ -876,8 +876,28 @@ class VoucherController
 // Handle the request
 $controller = new VoucherController();
 
+/**
+ * Voucher management is admin-only. Reject the request with HTTP 403 JSON
+ * unless the current session belongs to an admin.
+ */
+function voucherControllerRequireAdmin(): void
+{
+    if (($_SESSION['user']->role ?? null) !== 'admin') {
+        http_response_code(403);
+        header('Content-Type: application/json');
+        echo json_encode(['success' => false, 'message' => 'Access denied. Admin privileges required.']);
+        exit;
+    }
+}
+
+$voucherAdminPostActions = ['register', 'update', 'updateStatus', 'delete', 'bulkDelete', 'assign', 'previewBulkImport', 'executeBulkImport'];
+$voucherAdminGetActions = ['showAll', 'getMembers', 'downloadTemplate', 'showVoucherQr', 'downloadVoucherQr'];
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? $_GET['action'] ?? 'register';
+    if (in_array($action, $voucherAdminPostActions, true)) {
+        voucherControllerRequireAdmin();
+    }
 
     if ($action === 'register') {
         $controller->registerVoucher();
@@ -901,6 +921,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 } else {
     // Handle GET requests
     $action = $_GET['action'] ?? '';
+    if (in_array($action, $voucherAdminGetActions, true)) {
+        voucherControllerRequireAdmin();
+    }
 
     if ($action === 'showAll') {
         $controller->showAllVouchers();

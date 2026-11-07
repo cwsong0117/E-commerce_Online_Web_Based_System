@@ -3,6 +3,7 @@ session_start();
 header('Content-Type: application/json');
 
 require __DIR__ . '/../../database/connection.php';
+require_once __DIR__ . '/../../service/InventoryService.php';
 
 try {
     // Check if user is logged in
@@ -60,30 +61,71 @@ try {
         $subtotal += $item['price'] * $item['quantity'];
     }
     
+    // Make sure every selected item is still in stock BEFORE any payment is taken
+    $inventoryService = new InventoryService($conn);
+    $inventoryService->assertStockAvailable($cartItems);
+
     $shippingFee = 10.00;
     $taxRate = 0.06;
     $tax = $subtotal * $taxRate;
     $voucherDiscount = 0;
-    if ($voucher && $subtotal >= ($voucher['minSpend'] ?? 0)) {
-        if ($voucher['type'] === 'percent') {
-            $voucherDiscount = $subtotal * ($voucher['value'] / 100);
-            if (!empty($voucher['maxDiscount'])) {
-                $voucherDiscount = min($voucherDiscount, $voucher['maxDiscount']);
+
+    // Never trust voucher details sent by the browser: only the voucher id is used,
+    // and everything else is loaded from the database and re-validated here.
+    $voucherId = null;
+    $clientVoucherId = is_array($voucher) ? (int)($voucher['id'] ?? 0) : 0;
+    if ($clientVoucherId > 0) {
+        $vStmt = $conn->prepare("
+            SELECT v.* FROM voucher v
+            WHERE v.voucher_id = :voucher_id
+              AND v.status = 'active'
+              AND v.start_date <= CURDATE()
+              AND v.end_date >= CURDATE()
+              AND NOT EXISTS (
+                  SELECT 1 FROM voucher_usage vu
+                  WHERE vu.voucher_id = v.voucher_id AND vu.user_id = :user_id
+              )
+        ");
+        $vStmt->execute([':voucher_id' => $clientVoucherId, ':user_id' => $userId]);
+        $voucherRow = $vStmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$voucherRow) {
+            throw new Exception('This voucher is invalid, expired or already used. Please remove it and try again.');
+        }
+        if ($subtotal < (float)$voucherRow['min_spend']) {
+            throw new Exception('Your order does not meet the minimum spend for this voucher.');
+        }
+
+        if ($voucherRow['type'] === 'percent') {
+            $voucherDiscount = $subtotal * ((float)$voucherRow['discount_value'] / 100);
+            if (!empty($voucherRow['max_discount'])) {
+                $voucherDiscount = min($voucherDiscount, (float)$voucherRow['max_discount']);
             }
-        } elseif ($voucher['type'] === 'fixed') {
-            $voucherDiscount = $voucher['value'];
-        } elseif ($voucher['type'] === 'freeshipping') {
+        } elseif ($voucherRow['type'] === 'fixed') {
+            $voucherDiscount = (float)$voucherRow['discount_value'];
+        } elseif ($voucherRow['type'] === 'freeshipping') {
             $voucherDiscount = $shippingFee;
             $shippingFee = 0;
         }
+        // A voucher can never make the order cheaper than free goods
+        $voucherDiscount = min($voucherDiscount, $subtotal + $shippingFee + $tax);
+
+        $voucherId = (int)$voucherRow['voucher_id'];
+        // Canonical (server-side) voucher data, same shape the confirmation page expects
+        $voucher = [
+            'id' => $voucherId,
+            'code' => $voucherRow['code'],
+            'type' => $voucherRow['type'],
+            'value' => (float)$voucherRow['discount_value'],
+            'minSpend' => (float)$voucherRow['min_spend'],
+            'maxDiscount' => $voucherRow['max_discount'] !== null ? (float)$voucherRow['max_discount'] : null,
+        ];
+    } else {
+        $voucher = null;
     }
-    $totalAmount = $subtotal + $shippingFee + $tax - $voucherDiscount;
-    
+    $totalAmount = round($subtotal + $shippingFee + $tax - $voucherDiscount, 2);
+
     // Create pending order
-    $voucherId = null;
-    if ($voucher && !empty($voucher['id'])) {
-        $voucherId = $voucher['id'];
-    }
     if ($voucherId) {
         $orderStmt = $conn->prepare("
             INSERT INTO orders (user_id, total_amount, order_status, create_at, voucher_id)
@@ -125,14 +167,14 @@ try {
     ");
     
     foreach ($cartItems as $item) {
-        $subtotal = $item['price'] * $item['quantity'];
+        $lineSubtotal = $item['price'] * $item['quantity'];
         $itemStmt->execute([
             ':order_id' => $orderId,
             ':product_id' => $item['product_id'],
             ':product_name' => $item['name'],
             ':product_price' => $item['price'],
             ':quantity' => $item['quantity'],
-            ':subtotal' => $subtotal,
+            ':subtotal' => $lineSubtotal,
             ':variant_id' => $item['variant_id'],
             ':size' => $item['size']
         ]);

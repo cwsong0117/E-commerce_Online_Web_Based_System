@@ -521,6 +521,13 @@ class MemberController
                     throw new Exception("User ID is required");
                 }
 
+                // Only admins may edit other users; everyone else may edit only themselves
+                $sessionUser = $_SESSION['user'] ?? null;
+                if (!$sessionUser
+                    || ($sessionUser->role !== 'admin' && (int)$_POST['user_id'] !== (int)$sessionUser->user_id)) {
+                    throw new Exception("Unauthorized access");
+                }
+
                 // Basic input sanitization
                 $username = isset($_POST['username']) ? trim($_POST['username']) : '';
                 $full_name = isset($_POST['full_name']) ? trim($_POST['full_name']) : '';
@@ -1410,8 +1417,42 @@ class MemberController
 // Handle the request
 $controller = new MemberController();
 
+/**
+ * Reject the request unless the current session satisfies $requirement.
+ * $requirement: 'admin' (admin session) or 'user' (any logged-in user).
+ * Responds with HTTP 403 JSON, since these endpoints are called via AJAX/forms.
+ */
+function memberControllerRequire(string $requirement): void
+{
+    $role = $_SESSION['user']->role ?? null;
+    $allowed = $requirement === 'admin'
+        ? ($role === 'admin')
+        : !empty($_SESSION['user']);
+
+    if (!$allowed) {
+        http_response_code(403);
+        header('Content-Type: application/json');
+        echo json_encode([
+            'success' => false,
+            'message' => $requirement === 'admin'
+                ? 'Access denied. Admin privileges required.'
+                : 'Please log in first.'
+        ]);
+        exit;
+    }
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? $_GET['action'] ?? 'register';
+
+    // Admin-only member management actions
+    if (in_array($action, ['updateStatus', 'delete', 'bulkDelete'], true)) {
+        memberControllerRequire('admin');
+    }
+    // Profile update: must be logged in (self-vs-admin is enforced in updateMember)
+    if ($action === 'update') {
+        memberControllerRequire('user');
+    }
 
     if ($action === 'register') {
         $controller->registerMember();
@@ -1454,6 +1495,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_GET['action'] ?? '';
 
     if ($action === 'showAll') {
+        memberControllerRequire('admin');
         $controller->showAllMembers();
     } elseif ($action === 'login') {
         $controller->showLogin();

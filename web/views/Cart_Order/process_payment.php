@@ -52,9 +52,21 @@ try {
 
     if ($paymentIntentId) {
         // Stripe payment flow
+        // The intent must be the one we created for this session...
+        if (empty($_SESSION['payment_intent_id']) || !hash_equals($_SESSION['payment_intent_id'], (string)$paymentIntentId)) {
+            throw new Exception('Payment session mismatch. Please try again.');
+        }
         $paymentIntent = \Stripe\PaymentIntent::retrieve($paymentIntentId);
         if ($paymentIntent->status !== 'succeeded') {
             throw new Exception('Payment not completed');
+        }
+        // ...and it must have been charged for exactly this order's total
+        $expectedCents = (int)round(((float)$order['total_amount']) * 100);
+        if ((int)$paymentIntent->amount !== $expectedCents
+            || strtolower((string)$paymentIntent->currency) !== strtolower(STRIPE_CURRENCY)
+            || (string)($paymentIntent->metadata['order_id'] ?? '') !== (string)$orderId) {
+            error_log("Payment mismatch for order {$orderId}: intent amount={$paymentIntent->amount}, expected={$expectedCents}");
+            throw new Exception('Payment amount does not match the order total.');
         }
         // Update order status to paid
         $orderStmt = $conn->prepare("
@@ -75,6 +87,9 @@ try {
         ]);
         
         error_log("Stripe payment recorded for order {$orderId} with status 'paid'");
+    } elseif (in_array($paymentMethod, ['online-banking', 'e-wallet'], true) && !ALLOW_SIMULATED_PAYMENTS) {
+        // No real gateway is integrated for these methods, so they must stay off outside demos
+        throw new Exception('This payment method is currently unavailable.');
     } elseif ($paymentMethod === 'online-banking') {
         // Simulated payment flow for online banking (FPX)
         $orderStmt = $conn->prepare("
@@ -130,8 +145,8 @@ try {
 
     // Get cart items from order_items to delete from cart
     $itemsStmt = $conn->prepare("
-        SELECT oi.product_id, oi.quantity 
-        FROM order_item oi 
+        SELECT oi.product_id, oi.variant_id, oi.size
+        FROM order_item oi
         WHERE oi.order_id = :order_id
     ");
     $itemsStmt->execute([':order_id' => $orderId]);
@@ -143,18 +158,24 @@ try {
     $cartRow = $cartIdStmt->fetch(PDO::FETCH_ASSOC);
     $cartId = $cartRow ? $cartRow['cart_id'] : null;
 
-    // Delete corresponding items from cart
-    foreach ($orderItems as $item) {
+    // Remove exactly the purchased cart lines (same product + variant + size).
+    // "<=>" is NULL-safe equality, so items without a variant or size still match.
+    if ($cartId) {
         $deleteStmt = $conn->prepare("
-            DELETE FROM cart_item 
-            WHERE cart_id = :cart_id 
-            AND product_id = :product_id 
-            LIMIT :quantity
+            DELETE FROM cart_item
+            WHERE cart_id = :cart_id
+            AND product_id = :product_id
+            AND variant_id <=> :variant_id
+            AND size <=> :size
         ");
-        $deleteStmt->bindValue(':cart_id', $cartId, PDO::PARAM_INT);
-        $deleteStmt->bindValue(':product_id', $item['product_id'], PDO::PARAM_INT);
-        $deleteStmt->bindValue(':quantity', $item['quantity'], PDO::PARAM_INT);
-        $deleteStmt->execute();
+        foreach ($orderItems as $item) {
+            $deleteStmt->execute([
+                ':cart_id' => $cartId,
+                ':product_id' => $item['product_id'],
+                ':variant_id' => $item['variant_id'],
+                ':size' => $item['size']
+            ]);
+        }
     }
 
     $conn->commit();

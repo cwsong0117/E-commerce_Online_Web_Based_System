@@ -28,28 +28,45 @@ try {
         throw new Exception('User not logged in');
     }
     
-    $amount = $input['amount'] ?? 0;
-    $orderData = $input['orderData'] ?? [];
-    
-    if ($amount <= 0) {
+    // The amount is NEVER taken from the browser: it comes from the pending order
+    // in the database, which belongs to this user.
+    $orderId = (int)($input['orderId'] ?? ($_SESSION['pending_order_id'] ?? 0));
+    if ($orderId <= 0) {
+        throw new Exception('Missing order');
+    }
+
+    $db = new Database();
+    $conn = $db->getConnection();
+    $orderStmt = $conn->prepare("
+        SELECT order_id, total_amount FROM orders
+        WHERE order_id = :order_id AND user_id = :user_id AND order_status = 'pending'
+    ");
+    $orderStmt->execute([':order_id' => $orderId, ':user_id' => $userId]);
+    $order = $orderStmt->fetch(PDO::FETCH_ASSOC);
+    if (!$order) {
+        throw new Exception('Order not found or already processed');
+    }
+
+    $amountInCents = (int)round(((float)$order['total_amount']) * 100); // Stripe uses the smallest unit
+    if ($amountInCents <= 0) {
         throw new Exception('Invalid amount');
     }
-    
+
     // Create Stripe Payment Intent
     $paymentIntent = \Stripe\PaymentIntent::create([
-        'amount' => (int)round($amount * 100), // Stripe uses cents (integer)
+        'amount' => $amountInCents,
         'currency' => STRIPE_CURRENCY,
         'payment_method_types' => ['card'],
         'metadata' => [
             'user_id' => $userId,
+            'order_id' => $orderId,
             'order_type' => 'ecommerce'
         ]
     ]);
-    
-    // Store payment intent ID and order ID in session for later verification
+
+    // Remember which intent belongs to which order so process_payment can verify it
     $_SESSION['payment_intent_id'] = $paymentIntent->id;
-    $_SESSION['pending_order_data'] = $orderData;
-    $_SESSION['pending_order_id'] = $input['orderId'] ?? null;
+    $_SESSION['pending_order_id'] = $orderId;
     
     echo json_encode([
         'success' => true,

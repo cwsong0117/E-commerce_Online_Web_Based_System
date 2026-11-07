@@ -10,6 +10,6 @@ CREATE TABLE IF NOT EXISTS order_item (
     subtotal DECIMAL(10, 2) NOT NULL CHECK(subtotal >= 0),
 
     FOREIGN KEY (order_id) REFERENCES orders(order_id),
-    FOREIGN KEY (product_id) REFERENCES product(product_id)
+    FOREIGN KEY (product_id) REFERENCES product(product_id),
     FOREIGN KEY (variant_id) REFERENCES product_variant(variant_id)
 );

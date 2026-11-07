@@ -10,6 +10,8 @@ CREATE TABLE IF NOT EXISTS users (
     password VARCHAR(255) NOT NULL,
     reset_otp VARCHAR(6) NULL,
     reset_otp_expires_at DATETIME NULL,
+    remember_token VARCHAR(255) NULL,
+    remember_token_expires_at DATETIME NULL,
     role ENUM('member','admin') DEFAULT 'member',
     status ENUM('active','inactive','banned','blocked') DEFAULT 'active',
     failed_login_attempts INT DEFAULT 0,
