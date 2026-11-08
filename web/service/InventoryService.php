@@ -210,6 +210,27 @@ class InventoryService {
         }
     }
 
+    // Total stock left for one product / variant / size combination
+    public function getAvailableStock($productId, $variantId = null, $size = null) {
+        $sql = "SELECT COALESCE(SUM(stock_quantity), 0) FROM inventory WHERE product_id = :pid";
+        $params = [':pid' => (int)$productId];
+        if ($variantId !== null) {
+            $sql .= " AND variant_id = :vid";
+            $params[':vid'] = (int)$variantId;
+        } else {
+            $sql .= " AND variant_id IS NULL";
+        }
+        if ($size !== null && $size !== '') {
+            $sql .= " AND size = :size";
+            $params[':size'] = $size;
+        } else {
+            $sql .= " AND (size IS NULL OR size = '' OR size = 'default')";
+        }
+        $stmt = $this->conn->prepare($sql);
+        $stmt->execute($params);
+        return (int)$stmt->fetchColumn();
+    }
+
     /**
      * Verify there is enough stock for each requested line, without changing anything.
      * Used before taking payment so a customer is never charged for unavailable items.
@@ -225,23 +246,7 @@ class InventoryService {
             $qty = (int)$it['quantity'];
             if ($qty <= 0) { continue; }
 
-            $sql = "SELECT COALESCE(SUM(stock_quantity), 0) FROM inventory WHERE product_id = :pid";
-            $params = [':pid' => $pid];
-            if ($vid !== null) {
-                $sql .= " AND variant_id = :vid";
-                $params[':vid'] = $vid;
-            } else {
-                $sql .= " AND variant_id IS NULL";
-            }
-            if ($size !== null && $size !== '') {
-                $sql .= " AND size = :size";
-                $params[':size'] = $size;
-            } else {
-                $sql .= " AND (size IS NULL OR size = '' OR size = 'default')";
-            }
-            $stmt = $this->conn->prepare($sql);
-            $stmt->execute($params);
-            $available = (int)$stmt->fetchColumn();
+            $available = $this->getAvailableStock($pid, $vid, $size);
 
             if ($available < $qty) {
                 $name = $it['name'] ?? ('product ' . $pid);

@@ -139,15 +139,22 @@ $(document).ready(function() {
                 data: { 
                     action: 'updateQuantity',
                     cart_item_id: cartItemId,
-                    quantity: newQty 
+                    quantity: newQty
                 },
-                success: function() {
+                success: function(response) {
+                    // The server limits the quantity to the stock left
+                    if (response.success && response.quantity < newQty) {
+                        display.text(response.quantity);
+                        updateItemTotal($button.closest('tr'));
+                        updateOrderSummary();
+                        alert('Only ' + response.stock + ' left in stock.');
+                    }
                     updateCartCount(); // Update navbar count
                 }
             });
         }
     });
-    
+
     // handle quantity decrease button
     // when user clicks the decrease button, decrease the amount of relative item by 1
     $(document).on('click', '.minus-btn', function() {

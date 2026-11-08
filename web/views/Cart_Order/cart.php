@@ -64,6 +64,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_POST['product_id'])) {
         ]);
         $existingItem = $checkItemStmt->fetch(PDO::FETCH_ASSOC);
 
+        // Don't let the cart hold more than the stock left
+        require_once __DIR__ . '/../../service/InventoryService.php';
+        $inventory = new InventoryService($conn);
+        $stock = $inventory->getAvailableStock($pid, $vid, $size);
+        $inCart = $existingItem ? (int)$existingItem['quantity'] : 0;
+        if ($inCart + $qty > $stock) {
+            $qty = $stock - $inCart;
+        }
+        if ($qty <= 0) {
+            $message = 'You already have all the available stock of this item in your cart.';
+            if ($isAjax) {
+                header('Content-Type: application/json');
+                echo json_encode(['success' => false, 'message' => $message]);
+                exit;
+            }
+            $_SESSION['error_message'] = $message;
+            header('Location: cart.php');
+            exit;
+        }
+
         if ($existingItem) {
             // If exists, just update the quantity
             $newQty = $existingItem['quantity'] + $qty;

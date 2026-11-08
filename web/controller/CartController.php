@@ -1,6 +1,7 @@
 <?php
 session_start();
 require __DIR__ . '/../database/connection.php';
+require_once __DIR__ . '/../service/InventoryService.php';
 
 header('Content-Type: application/json');
 
@@ -82,6 +83,23 @@ class CartController {
             return;
         }
         
+        // Don't allow more than the stock left
+        $itemStmt = $this->conn->prepare("SELECT ci.product_id, ci.variant_id, ci.size
+                        FROM cart_item ci
+                        JOIN shopping_cart sc ON ci.cart_id = sc.cart_id
+                        WHERE ci.cart_item_id = :cart_item_id AND sc.user_id = :user_id");
+        $itemStmt->execute([':cart_item_id' => $cartItemId, ':user_id' => $userId]);
+        $item = $itemStmt->fetch(PDO::FETCH_ASSOC);
+        if (!$item) {
+            echo json_encode(['success' => false, 'message' => 'Cart item not found']);
+            return;
+        }
+        $inventory = new InventoryService($this->conn);
+        $stock = $inventory->getAvailableStock($item['product_id'], $item['variant_id'], $item['size']);
+        if ($quantity > $stock) {
+            $quantity = max(1, $stock);
+        }
+
         $updateQuery = "UPDATE cart_item ci
                         JOIN shopping_cart sc ON ci.cart_id = sc.cart_id
                         SET ci.quantity = :quantity
@@ -95,7 +113,8 @@ class CartController {
             ':user_id' => $userId
         ]);
         
-        echo json_encode(['success' => $stmt->rowCount() > 0]);
+        // rowCount is 0 when the quantity did not change, so always report success here
+        echo json_encode(['success' => true, 'quantity' => $quantity, 'stock' => $stock]);
     }
 }
 
