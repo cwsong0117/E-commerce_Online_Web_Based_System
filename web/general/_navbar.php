@@ -16,7 +16,8 @@ if ($webRootDir !== false && $docRoot !== false) {
     $prefix = '/web/';
 }
 
-$siteRoot = rtrim(dirname($prefix), '/');
+// dirname() returns backslashes on Windows, so normalise them to forward slashes
+$siteRoot = rtrim(str_replace('\\', '/', dirname($prefix)), '/');
 $siteRoot = ($siteRoot === '' || $siteRoot === '.') ? '/' : $siteRoot . '/';
 ?>
 <link rel="stylesheet" href="<?php echo $prefix; ?>css/navbar.css?v=<?php echo filemtime(__DIR__ . '/../css/navbar.css'); ?>">
