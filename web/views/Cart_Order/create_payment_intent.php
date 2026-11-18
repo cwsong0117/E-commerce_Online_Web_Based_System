@@ -15,6 +15,7 @@ header('Content-Type: application/json');
 require __DIR__ . '/../../../vendor/autoload.php';
 require __DIR__ . '/../../config/stripe_config.php';
 require __DIR__ . '/../../database/connection.php';
+require_once __DIR__ . '/../../helpers/VoucherHelper.php';
 
 // Set Stripe API key
 \Stripe\Stripe::setApiKey(STRIPE_SECRET_KEY);
@@ -38,13 +39,19 @@ try {
     $db = new Database();
     $conn = $db->getConnection();
     $orderStmt = $conn->prepare("
-        SELECT order_id, total_amount FROM orders
+        SELECT order_id, total_amount, voucher_id FROM orders
         WHERE order_id = :order_id AND user_id = :user_id AND order_status = 'pending'
     ");
     $orderStmt->execute([':order_id' => $orderId, ':user_id' => $userId]);
     $order = $orderStmt->fetch(PDO::FETCH_ASSOC);
     if (!$order) {
         throw new Exception('Order not found or already processed');
+    }
+
+    // Check the voucher again before any money is taken: it may have expired or been
+    // used on another order since this one was created.
+    if (!empty($order['voucher_id']) && !findUsableVoucher($conn, (int)$order['voucher_id'], (int)$userId)) {
+        throw new Exception('The voucher on this order is no longer valid. Please go back to your cart and place the order again.');
     }
 
     $amountInCents = (int)round(((float)$order['total_amount']) * 100); // Stripe uses the smallest unit

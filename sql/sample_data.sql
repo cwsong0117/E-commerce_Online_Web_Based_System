@@ -98,3 +98,8 @@ INSERT INTO users (username, full_name, gender, contact_no, email, DateOfBirth, 
 SELECT 'testmember', 'Test Member', 'Other', '0123456789', 'testmember@example.com', '2000-01-01',
        '$2y$12$g7Bg7UcKi3RUfJbzENd/rO9.sShTOBwtzRO5247Hp55pMnn76Rmh6', 'member', 'active', 1
 WHERE NOT EXISTS (SELECT 1 FROM users WHERE username = 'testmember');
+
+-- A voucher can only be used by members it is assigned to, so give the sample member all three
+INSERT IGNORE INTO voucher_assignment (voucher_id, user_id)
+SELECT v.voucher_id, u.user_id FROM voucher v JOIN users u ON u.username = 'testmember'
+WHERE v.voucher_id IN (1, 2, 3);

@@ -130,14 +130,19 @@ $voucherQuery = "SELECT v.* FROM voucher v
 WHERE v.status = 'active'
     AND v.start_date <= CURDATE()
     AND v.end_date >= CURDATE()
+    AND EXISTS (
+        SELECT 1 FROM voucher_assignment va
+        WHERE va.voucher_id = v.voucher_id
+            AND va.user_id = :assigned_user_id
+    )
     AND NOT EXISTS (
         SELECT 1 FROM voucher_usage vu
         WHERE vu.voucher_id = v.voucher_id
-            AND vu.user_id = :user_id
+            AND vu.user_id = :used_user_id
     )
 ORDER BY v.type, v.min_spend";
 $voucherStmt = $conn->prepare($voucherQuery);
-$voucherStmt->execute([':user_id' => $userId]);
+$voucherStmt->execute([':assigned_user_id' => $userId, ':used_user_id' => $userId]);
 // fetch all vouchers as an array
 $vouchers = $voucherStmt->fetchAll(PDO::FETCH_ASSOC);
 

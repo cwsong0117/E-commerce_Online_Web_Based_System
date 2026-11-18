@@ -135,11 +135,17 @@ try {
     $voucherIdStmt->execute([':order_id' => $orderId]);
     $voucherRow = $voucherIdStmt->fetch(PDO::FETCH_ASSOC);
     if ($voucherRow && !empty($voucherRow['voucher_id'])) {
-        $insertUsageStmt = $conn->prepare("INSERT INTO voucher_usage (user_id, voucher_id, used_at) VALUES (:user_id, :voucher_id, NOW()) ON DUPLICATE KEY UPDATE used_at = NOW()");
-        $insertUsageStmt->execute([
-            ':user_id' => $userId,
-            ':voucher_id' => $voucherRow['voucher_id']
-        ]);
+        // Plain INSERT on purpose: if this voucher was already used (e.g. on another order
+        // paid at the same time) the duplicate key makes this fail and the payment is rolled back.
+        $insertUsageStmt = $conn->prepare("INSERT INTO voucher_usage (user_id, voucher_id, used_at) VALUES (:user_id, :voucher_id, NOW())");
+        try {
+            $insertUsageStmt->execute([
+                ':user_id' => $userId,
+                ':voucher_id' => $voucherRow['voucher_id']
+            ]);
+        } catch (PDOException $e) {
+            throw new Exception('This voucher has already been used on another order.');
+        }
         error_log("Voucher usage recorded for user {$userId}, voucher {$voucherRow['voucher_id']}");
     }
 

@@ -66,7 +66,11 @@ try {
         $paymentQuery = "UPDATE payment SET payment_status = :payment_status WHERE order_id = :order_id";
         $paymentStmt = $conn->prepare($paymentQuery);
         $paymentStmt->execute([':payment_status' => $paymentStatus, ':order_id' => $orderId]);
-        
+
+        // Give the voucher back to the customer
+        require_once __DIR__ . '/../helpers/VoucherHelper.php';
+        releaseVoucherForOrder($conn, (int)$orderId);
+
         // Log refund approval
         ActivityLogger::logOrderRefundApprove($orderId, $adminNote);
         

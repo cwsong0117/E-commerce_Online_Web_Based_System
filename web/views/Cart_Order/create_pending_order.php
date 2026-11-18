@@ -4,6 +4,7 @@ header('Content-Type: application/json');
 
 require __DIR__ . '/../../database/connection.php';
 require_once __DIR__ . '/../../service/InventoryService.php';
+require_once __DIR__ . '/../../helpers/VoucherHelper.php';
 
 try {
     // Check if user is logged in
@@ -75,19 +76,7 @@ try {
     $voucherId = null;
     $clientVoucherId = is_array($voucher) ? (int)($voucher['id'] ?? 0) : 0;
     if ($clientVoucherId > 0) {
-        $vStmt = $conn->prepare("
-            SELECT v.* FROM voucher v
-            WHERE v.voucher_id = :voucher_id
-              AND v.status = 'active'
-              AND v.start_date <= CURDATE()
-              AND v.end_date >= CURDATE()
-              AND NOT EXISTS (
-                  SELECT 1 FROM voucher_usage vu
-                  WHERE vu.voucher_id = v.voucher_id AND vu.user_id = :user_id
-              )
-        ");
-        $vStmt->execute([':voucher_id' => $clientVoucherId, ':user_id' => $userId]);
-        $voucherRow = $vStmt->fetch(PDO::FETCH_ASSOC);
+        $voucherRow = findUsableVoucher($conn, $clientVoucherId, (int)$userId);
 
         if (!$voucherRow) {
             throw new Exception('This voucher is invalid, expired or already used. Please remove it and try again.');

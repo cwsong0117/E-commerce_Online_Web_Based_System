@@ -458,6 +458,13 @@ class AdminController
             $updateStmt = $conn->prepare($updateQuery);
             $updateStmt->execute($params);
 
+            // A paid order that is cancelled or refunded by an admin gives the voucher back
+            if (in_array($orderStatus, ['canceled', 'refunded'], true)
+                && !in_array($oldOrderStatus, ['pending', 'canceled', 'refunded'], true)) {
+                require_once __DIR__ . '/../helpers/VoucherHelper.php';
+                releaseVoucherForOrder($conn, (int)$orderId);
+            }
+
             // Update payment_status in payment table if provided
             if ($paymentStatus) {
                 $paymentUpdateStmt = $conn->prepare("UPDATE payment SET payment_status = :payment_status WHERE order_id = :order_id");

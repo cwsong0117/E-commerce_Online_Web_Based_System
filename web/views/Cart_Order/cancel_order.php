@@ -22,6 +22,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['order_id'])) {
         // Pending (unpaid) order: nothing was deducted, so there is nothing to restock
         echo json_encode(['success' => true]);
     } elseif ($stmt->rowCount() > 0) {
+        // The order was paid, so give the voucher back to the customer
+        require_once '../../helpers/VoucherHelper.php';
+        releaseVoucherForOrder($conn, $orderId);
+
         // Restock inventory for each item in the order
         require_once '../../service/InventoryService.php';
         $inventoryService = new InventoryService($conn);
